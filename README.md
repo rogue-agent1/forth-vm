@@ -1,11 +1,6 @@
 # forth_vm
-
-forth_vm: Minimal Forth interpreter.
-
-Single-file, zero-dependency Python CLI.
-
+Single-file Python CLI tool. Zero dependencies, Python 3.8+.
 ## Usage
-
 ```bash
-python3 forth_vm.py test
+python3 forth_vm.py --test
 ```

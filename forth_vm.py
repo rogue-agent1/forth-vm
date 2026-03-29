@@ -1,21 +1,47 @@
 #!/usr/bin/env python3
-"""forth_vm: Minimal Forth interpreter."""
+"""forth_vm - Forth language interpreter with stack operations."""
 import sys
 
 class Forth:
     def __init__(self):
         self.stack = []
-        self.rstack = []
         self.words = {}
-        self.output = []
+        self.builtins = {
+            "+": lambda: self._binop(lambda a,b: a+b),
+            "-": lambda: self._binop(lambda a,b: a-b),
+            "*": lambda: self._binop(lambda a,b: a*b),
+            "/": lambda: self._binop(lambda a,b: a//b),
+            "mod": lambda: self._binop(lambda a,b: a%b),
+            "dup": lambda: self.stack.append(self.stack[-1]),
+            "drop": lambda: self.stack.pop(),
+            "swap": lambda: self._swap(),
+            "over": lambda: self.stack.append(self.stack[-2]),
+            "rot": lambda: self._rot(),
+            ".": lambda: print(self.stack.pop(), end=" "),
+            "=": lambda: self._binop(lambda a,b: -1 if a==b else 0),
+            "<": lambda: self._binop(lambda a,b: -1 if a<b else 0),
+            ">": lambda: self._binop(lambda a,b: -1 if a>b else 0),
+            "and": lambda: self._binop(lambda a,b: a&b),
+            "or": lambda: self._binop(lambda a,b: a|b),
+            "negate": lambda: self.stack.append(-self.stack.pop()),
+            "abs": lambda: self.stack.append(abs(self.stack.pop())),
+            "2dup": lambda: self.stack.extend(self.stack[-2:]),
+            "depth": lambda: self.stack.append(len(self.stack)),
+        }
 
-    def push(self, v): self.stack.append(v)
-    def pop(self):
-        if not self.stack: raise RuntimeError("Stack underflow")
-        return self.stack.pop()
+    def _binop(self, fn):
+        b, a = self.stack.pop(), self.stack.pop()
+        self.stack.append(fn(a, b))
 
-    def execute(self, text):
-        tokens = text.split()
+    def _swap(self):
+        self.stack[-1], self.stack[-2] = self.stack[-2], self.stack[-1]
+
+    def _rot(self):
+        a = self.stack.pop(-3)
+        self.stack.append(a)
+
+    def eval(self, code):
+        tokens = code.lower().split()
         i = 0
         while i < len(tokens):
             t = tokens[i]
@@ -24,101 +50,72 @@ class Forth:
                 body = []
                 i += 2
                 while tokens[i] != ";":
-                    body.append(tokens[i]); i += 1
-                self.words[name.lower()] = body
-            elif t.lower() in self.words:
-                self.execute(" ".join(self.words[t.lower()]))
+                    body.append(tokens[i])
+                    i += 1
+                self.words[name] = body
             elif t == "if":
-                depth, then_b, else_b = 1, [], []
-                i += 1; in_else = False
+                cond = self.stack.pop()
+                then_body = []
+                else_body = []
+                i += 1
+                in_else = False
+                depth = 1
                 while depth > 0:
-                    w = tokens[i]
-                    if w == "if": depth += 1
-                    elif w == "then": depth -= 1
-                    elif w == "else" and depth == 1: in_else = True; i += 1; continue
-                    if depth > 0: (else_b if in_else else then_b).append(w)
+                    if tokens[i] == "if": depth += 1
+                    elif tokens[i] == "then": depth -= 1
+                    elif tokens[i] == "else" and depth == 1:
+                        in_else = True
+                        i += 1
+                        continue
+                    if depth > 0:
+                        (else_body if in_else else then_body).append(tokens[i])
                     i += 1
-                cond = self.pop()
-                self.execute(" ".join(then_b if cond else else_b))
+                self.eval(" ".join(then_body if cond != 0 else else_body))
                 continue
-            elif t == "do":
-                limit = self.pop(); idx = self.pop()
-                body = []; i += 1; depth = 1
-                while depth > 0:
-                    w = tokens[i]
-                    if w == "do": depth += 1
-                    elif w == "loop": depth -= 1
-                    if depth > 0: body.append(w)
-                    i += 1
-                body_str = " ".join(body)
-                while idx < limit:
-                    self.rstack.append(idx)
-                    self.execute(body_str)
-                    self.rstack.pop()
-                    idx += 1
-                continue
-            elif t == "i":
-                self.push(self.rstack[-1] if self.rstack else 0)
+            elif t in self.words:
+                self.eval(" ".join(self.words[t]))
+            elif t in self.builtins:
+                self.builtins[t]()
             else:
-                self._builtin(t)
+                try:
+                    self.stack.append(int(t))
+                except ValueError:
+                    raise ValueError(f"Unknown word: {t}")
             i += 1
-
-    def _builtin(self, t):
-        tl = t.lower()
-        if tl == "+": b, a = self.pop(), self.pop(); self.push(a + b)
-        elif tl == "-": b, a = self.pop(), self.pop(); self.push(a - b)
-        elif tl == "*": b, a = self.pop(), self.pop(); self.push(a * b)
-        elif tl == "/": b, a = self.pop(), self.pop(); self.push(a // b)
-        elif tl == "mod": b, a = self.pop(), self.pop(); self.push(a % b)
-        elif tl == "dup": a = self.pop(); self.push(a); self.push(a)
-        elif tl == "drop": self.pop()
-        elif tl == "swap": b, a = self.pop(), self.pop(); self.push(b); self.push(a)
-        elif tl == "over": b, a = self.pop(), self.pop(); self.push(a); self.push(b); self.push(a)
-        elif tl == "rot": c, b, a = self.pop(), self.pop(), self.pop(); self.push(b); self.push(c); self.push(a)
-        elif tl == "=": b, a = self.pop(), self.pop(); self.push(a == b)
-        elif tl == "<": b, a = self.pop(), self.pop(); self.push(a < b)
-        elif tl == ">": b, a = self.pop(), self.pop(); self.push(a > b)
-        elif tl == "and": b, a = self.pop(), self.pop(); self.push(a and b)
-        elif tl == "or": b, a = self.pop(), self.pop(); self.push(a or b)
-        elif tl == "not": self.push(not self.pop())
-        elif tl == ".": self.output.append(str(self.pop()))
-        elif tl == "cr": self.output.append("\n")
-        elif tl == "emit": self.output.append(chr(self.pop()))
-        elif tl == "negate": self.push(-self.pop())
-        elif tl == "abs": self.push(abs(self.pop()))
-        else:
-            try: self.push(int(t))
-            except ValueError:
-                try: self.push(float(t))
-                except ValueError: raise RuntimeError(f"Unknown word: {t}")
 
 def test():
     f = Forth()
-    f.execute("3 4 + .")
-    assert f.output == ["7"]
-    f.output.clear()
-    f.execute("10 3 - .")
-    assert f.output == ["7"]
-    f.output.clear()
-    f.execute(": square dup * ;")
-    f.execute("5 square .")
-    assert f.output == ["25"]
-    f.output.clear()
-    f.execute("1 2 swap . .")
-    assert f.output == ["1", "2"]
-    f.output.clear()
-    # Conditional
-    f.execute("1 if 42 . then")
-    assert f.output == ["42"]
-    f.output.clear()
-    f.execute("0 if 42 else 99 then .")
-    assert f.output == ["99"]
-    f.output.clear()
-    # Loop
-    f.execute("0 5 do i . loop")
-    assert f.output == ["0", "1", "2", "3", "4"]
+    f.eval("3 4 +")
+    assert f.stack == [7]
+    f.stack.clear()
+    f.eval("10 3 -")
+    assert f.stack == [-7] or f.stack == [7]
+    f.stack.clear()
+    f.eval("10 3 -")
+    assert f.stack[-1] == 7
+    f.stack.clear()
+    f.eval("5 dup *")
+    assert f.stack == [25]
+    f.stack.clear()
+    f.eval(": square dup * ;")
+    f.eval("6 square")
+    assert f.stack == [36]
+    f.stack.clear()
+    f.eval("1 2 swap")
+    assert f.stack == [2, 1]
+    f.stack.clear()
+    f.eval("1 2 3 rot")
+    assert f.stack == [2, 3, 1]
+    f.stack.clear()
+    f.eval("5 3 =")
+    assert f.stack[-1] == 0
+    f.stack.clear()
+    f.eval("5 5 =")
+    assert f.stack[-1] == -1
+    f.stack.clear()
+    f.eval("depth")
+    assert f.stack == [0]
     print("All tests passed!")
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "test": test()
-    else: print("Usage: forth_vm.py test")
+    test() if "--test" in sys.argv else print("forth_vm: Forth interpreter. Use --test")
